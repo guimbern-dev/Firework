@@ -10,6 +10,8 @@ const AUTO_LAUNCH_MIN_MS = 1200;
 const AUTO_LAUNCH_MAX_MS = 2500;
 const HIT_RADIUS = 50;
 const GAME_DURATION = 60;
+const CHAIN_RADIUS = 95;
+const CHAIN_DELAY_MS = 120;
 
 function rand(min, max) {
   return min + Math.random() * (max - min);
@@ -127,13 +129,35 @@ class Rocket {
     const bx = this.x;
     const by = this.y;
     const count = randInt(BURST_COUNT_MIN, BURST_COUNT_MAX);
+    const style = randInt(0, 2);
 
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * TAU + rand(-0.2, 0.2);
-      const speed = rand(3, 10);
+      let vx, vy;
+
+      if (style === 1) {
+        // Étoile : branches rapides / creux lents
+        const speed = i % 2 === 0 ? rand(7, 11) : rand(1.5, 3);
+        vx = Math.cos(angle) * speed;
+        vy = Math.sin(angle) * speed;
+      } else if (style === 2) {
+        // Cœur paramétrique
+        const t = (i / count) * TAU;
+        const hx = 16 * Math.pow(Math.sin(t), 3);
+        const hy = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+        const scale = rand(0.35, 0.65);
+        vx = hx * scale;
+        vy = hy * scale;
+      } else {
+        // Anneau uniforme
+        const speed = rand(3, 10);
+        vx = Math.cos(angle) * speed;
+        vy = Math.sin(angle) * speed;
+      }
+
       particles.push(new Particle(bx, by, {
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
+        vx,
+        vy,
         hue: this.hue + rand(-15, 15),
         sat: rand(80, 100),
         light: rand(55, 75),
@@ -188,6 +212,7 @@ class Game {
     this.timeLeft = GAME_DURATION;
     this._replayBtn = null;
     this._audioCtx = null;
+    this._shake = 0;
   }
 
   init() {
@@ -305,9 +330,20 @@ class Game {
 
     if (hit) {
       hit.burst(this.particles);
+      this.particles.push(new Particle(hit.x, hit.y, {
+        vx: 0, vy: 0,
+        hue: 0, sat: 0, light: 100,
+        alpha: 0.85,
+        alphaDecay: 0.08,
+        radius: 55,
+        radiusDecay: 0.88,
+        gravity: 0,
+        drag: 1,
+      }));
       this._addScore(hit.x, hit.y);
       this._playBurst();
       this.rockets.splice(this.rockets.indexOf(hit), 1);
+      this._triggerChain(hit.x, hit.y, 0);
     }
   }
 
@@ -348,6 +384,35 @@ class Game {
     }
   }
 
+  _triggerChain(x, y, depth = 0) {
+    if (depth >= 3) return;
+    for (let i = this.rockets.length - 1; i >= 0; i--) {
+      const r = this.rockets[i];
+      if (Math.hypot(r.x - x, r.y - y) < CHAIN_RADIUS) {
+        const chainRocket = r;
+        this.rockets.splice(i, 1);
+        setTimeout(() => {
+          if (this.gameOver) return;
+          chainRocket.burst(this.particles);
+          this.particles.push(new Particle(chainRocket.x, chainRocket.y, {
+            vx: 0, vy: 0,
+            hue: 0, sat: 0, light: 100,
+            alpha: 0.7,
+            alphaDecay: 0.08,
+            radius: 45,
+            radiusDecay: 0.88,
+            gravity: 0,
+            drag: 1,
+          }));
+          this._playBurst();
+          this.score += 50;
+          this.scoreLabels.push(new ScoreLabel(chainRocket.x, chainRocket.y - 20, 'CHAIN ! +50', '#ff9900'));
+          this._triggerChain(chainRocket.x, chainRocket.y, depth + 1);
+        }, CHAIN_DELAY_MS * (depth + 1));
+      }
+    }
+  }
+
   _addScore(x, y) {
     const now = Date.now();
     if (now - this.lastBurstTime < COMBO_WINDOW_MS) {
@@ -360,12 +425,17 @@ class Game {
     const points = 100 * this.combo;
     this.score += points;
 
+    if (this.combo >= 3) {
+      this._shake = Math.min(this.combo * 2.5, 15);
+    }
+
     const label = this.combo > 1 ? `+${points} x${this.combo}` : `+${points}`;
     this.scoreLabels.push(new ScoreLabel(x, y - 20, label, 'white'));
   }
 
   _frame(timestamp) {
     this._lastTimestamp = timestamp;
+    this._shake *= 0.82;
 
     this._frameCount++;
     if (timestamp - this._lastFpsCheck > 1000) {
@@ -430,6 +500,12 @@ class Game {
   _render() {
     const { ctx, canvas } = this;
 
+    const shaking = this._shake > 0.5;
+    if (shaking) {
+      ctx.save();
+      ctx.translate(rand(-this._shake, this._shake), rand(-this._shake, this._shake));
+    }
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -458,6 +534,8 @@ class Game {
 
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
+
+    if (shaking) ctx.restore();
 
     this._renderHUD();
 
