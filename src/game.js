@@ -566,6 +566,11 @@ class Game {
       ctx.font = 'bold 22px monospace';
       ctx.fillStyle = 'rgba(255, 220, 50, 0.95)';
       ctx.fillText('▶  Toucher pour commencer', canvas.width / 2, canvas.height / 2 + 52);
+
+      ctx.font = '12px monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillText('by GUIM', canvas.width / 2, canvas.height - 18);
+
       ctx.textAlign = 'left';
       return;
     }
@@ -604,16 +609,21 @@ class Game {
     ctx.fillStyle = 'rgba(0,0,0,0.78)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const titleSize = Math.min(44, Math.floor(canvas.width / 11));
+    const scoreSize = Math.min(30, Math.floor(canvas.width / 13));
+    const btnSize   = Math.min(22, Math.floor(canvas.width / 17));
+    const bw = Math.min(240, canvas.width * 0.60);
+    const bh = 56;
+
     ctx.textAlign = 'center';
-    ctx.font = 'bold 44px monospace';
+    ctx.font = `bold ${titleSize}px monospace`;
     ctx.fillStyle = 'rgba(255, 210, 40, 0.95)';
     ctx.fillText('Bonne Saint-Jean !', cx, cy - 70);
 
-    ctx.font = 'bold 30px monospace';
+    ctx.font = `bold ${scoreSize}px monospace`;
     ctx.fillStyle = 'white';
     ctx.fillText(`Score final : ${this.score}`, cx, cy - 10);
 
-    const bw = 240, bh = 56;
     const bx = cx - bw / 2;
     const by = cy + 30;
     this._replayBtn = { x: bx, y: by, w: bw, h: bh };
@@ -627,9 +637,13 @@ class Game {
     }
     ctx.fill();
 
-    ctx.font = 'bold 22px monospace';
+    ctx.font = `bold ${btnSize}px monospace`;
     ctx.fillStyle = '#000';
     ctx.fillText('↺  Rejouer', cx, by + 38);
+
+    ctx.font = `${Math.min(13, Math.floor(canvas.width / 28))}px monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillText('by GUIM', cx, canvas.height - 18);
 
     ctx.textAlign = 'left';
   }
