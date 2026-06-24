@@ -40,7 +40,6 @@ class Particle {
     this.radiusDecay = opts.radiusDecay ?? 0.98;
     this.gravity = opts.gravity ?? GRAVITY;
     this.drag = opts.drag ?? DRAG;
-    this.isDebris = opts.isDebris ?? false;
   }
 
   update() {
@@ -213,17 +212,16 @@ class Bird {
     }
   }
 
-  explode(particles) {
+  explode(particles, debrisParticles) {
     for (let i = 0; i < 25; i++) {
       const angle = rand(0, TAU);
-      particles.push(new Particle(this.x, this.y, {
+      debrisParticles.push(new Particle(this.x, this.y, {
         vx: Math.cos(angle) * rand(4, 13),
         vy: Math.sin(angle) * rand(4, 13),
         hue: rand(0, 30), sat: 90, light: 60,
         alpha: 1, alphaDecay: 0.018,
         radius: rand(3, 6), radiusDecay: 0.965,
         gravity: 0.08, drag: 0.97,
-        isDebris: true,
       }));
     }
     particles.push(new Particle(this.x, this.y, {
@@ -259,14 +257,21 @@ class Game {
     this._shake = 0;
     this.birds = [];
     this._nextBirdTime = 0;
-    this._hasDebris = false;
+    this.debrisParticles = [];
     this._birdSprites = null;
+    this._stars = null;
   }
 
   init() {
     this.canvas = document.getElementById('canvas');
     this.ctx = this.canvas.getContext('2d');
     this._buildBirdSprites();
+    this._stars = Array.from({ length: 80 }, () => ({
+      fx: Math.random(),
+      fy: Math.random() * 0.75,
+      r: rand(0.5, 1.5),
+      phase: rand(0, TAU),
+    }));
 
     this._resize();
     window.addEventListener('resize', () => this._resize());
@@ -369,8 +374,7 @@ class Game {
     for (let i = this.birds.length - 1; i >= 0; i--) {
       const b = this.birds[i];
       if (Math.hypot(b.x - x, b.y - y) < BIRD_HIT_RADIUS) {
-        b.explode(this.particles);
-        this._hasDebris = true;
+        b.explode(this.particles, this.debrisParticles);
         this._addScore(b.x, b.y);
         this._playBurst();
         this.birds.splice(i, 1);
@@ -411,7 +415,7 @@ class Game {
 
   _resetGame() {
     this.birds = [];
-    this._hasDebris = false;
+    this.debrisParticles = [];
     this.rockets = [];
     this.particles = [];
     this.scoreLabels = [];
@@ -651,31 +655,35 @@ class Game {
       this.particles.splice(0, this.particles.length - MAX_PARTICLES);
     }
 
-    if (this._hasDebris) {
-      let foundDebris = false;
-      for (let i = this.particles.length - 1; i >= 0; i--) {
-        const p = this.particles[i];
-        if (!p.isDebris || p.alpha < 0.15) continue;
-        foundDebris = true;
-        let hit = false;
-        for (let j = this.rockets.length - 1; j >= 0; j--) {
-          if (Math.hypot(p.x - this.rockets[j].x, p.y - this.rockets[j].y) < DEBRIS_HIT_RADIUS) {
-            const r = this.rockets[j];
-            this.rockets.splice(j, 1);
-            r.burst(this.particles);
-            this._playBurst();
-            this.score += 30;
-            this.scoreLabels.push(new ScoreLabel(r.x, r.y - 20, 'FRAPPE ! +30', '#ff6600'));
-            hit = true;
-            break;
-          }
-        }
-        if (hit) {
-          this.particles[i] = this.particles[this.particles.length - 1];
-          this.particles.pop();
+    let d = this.debrisParticles.length;
+    while (d--) {
+      this.debrisParticles[d].update();
+      if (this.debrisParticles[d].dead) {
+        this.debrisParticles[d] = this.debrisParticles[this.debrisParticles.length - 1];
+        this.debrisParticles.pop();
+      }
+    }
+
+    for (let i = this.debrisParticles.length - 1; i >= 0; i--) {
+      const p = this.debrisParticles[i];
+      if (p.alpha < 0.15) continue;
+      let hit = false;
+      for (let j = this.rockets.length - 1; j >= 0; j--) {
+        if (Math.hypot(p.x - this.rockets[j].x, p.y - this.rockets[j].y) < DEBRIS_HIT_RADIUS) {
+          const r = this.rockets[j];
+          this.rockets.splice(j, 1);
+          r.burst(this.particles);
+          this._playBurst();
+          this.score += 30;
+          this.scoreLabels.push(new ScoreLabel(r.x, r.y - 20, 'FRAPPE ! +30', '#ff6600'));
+          hit = true;
+          break;
         }
       }
-      this._hasDebris = foundDebris;
+      if (hit) {
+        this.debrisParticles[i] = this.debrisParticles[this.debrisParticles.length - 1];
+        this.debrisParticles.pop();
+      }
     }
 
     i = this.scoreLabels.length;
@@ -699,9 +707,44 @@ class Game {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // Lune pleine
+    ctx.save();
+    ctx.shadowBlur = 22;
+    ctx.shadowColor = 'rgba(255, 240, 160, 0.7)';
+    const moonX = canvas.width * 0.85;
+    const moonY = canvas.height * 0.12;
+    ctx.beginPath(); ctx.arc(moonX, moonY, 28, 0, TAU);
+    ctx.fillStyle = '#fffde0'; ctx.fill();
+    ctx.beginPath(); ctx.arc(moonX + 8, moonY - 4, 24, 0, TAU);
+    ctx.fillStyle = 'rgba(200,190,150,0.18)'; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // Étoiles scintillantes
+    ctx.save();
+    const t = this._lastTimestamp;
+    for (const s of this._stars) {
+      ctx.globalAlpha = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(t * 0.0007 + s.phase));
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.arc(s.fx * canvas.width, s.fy * canvas.height, s.r, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
     if (this.glowEnabled) ctx.shadowBlur = 8;
 
     for (const p of this.particles) {
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.shadowColor = `hsl(${p.hue}, 100%, 70%)`;
+      ctx.fillStyle = `hsl(${p.hue}, ${p.sat}%, ${p.light}%)`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, TAU);
+      ctx.fill();
+    }
+
+    for (const p of this.debrisParticles) {
       ctx.globalAlpha = Math.max(0, p.alpha);
       ctx.shadowColor = `hsl(${p.hue}, 100%, 70%)`;
       ctx.fillStyle = `hsl(${p.hue}, ${p.sat}%, ${p.light}%)`;
