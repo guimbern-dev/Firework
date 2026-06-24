@@ -317,6 +317,40 @@ class Game {
     src.start(now);
   }
 
+  _playCheers(intensity) {
+    if (!this._audioCtx) return;
+    const ctx = this._audioCtx;
+    const now = ctx.currentTime;
+    const duration = 0.5 + intensity * 0.35;
+
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ctx.sampleRate;
+      const mod = 0.6 + 0.4 * Math.abs(Math.sin(t * 12 + Math.random() * 0.3));
+      data[i] = (Math.random() * 2 - 1) * mod * (1 - t / duration);
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1800;
+    filter.Q.value = 0.7;
+
+    const vol = Math.min(0.15 + intensity * 0.1, 0.42);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now + 0.06);
+    gain.gain.linearRampToValueAtTime(0, now + duration);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(now);
+  }
+
   _playBurst() {
     if (!this._audioCtx) return;
     const ctx = this._audioCtx;
@@ -579,6 +613,10 @@ class Game {
     }
     this.lastBurstTime = now;
 
+    if (this.combo === 2)      this._playCheers(1);
+    else if (this.combo === 3) this._playCheers(2);
+    else if (this.combo >= 4)  this._playCheers(3);
+
     const points = 100 * this.combo;
     this.score += points;
 
@@ -756,16 +794,21 @@ class Game {
     if (this.glowEnabled) ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
 
+    ctx.shadowBlur = 0;
     for (const rocket of this.rockets) {
-      ctx.shadowBlur = this.glowEnabled ? 20 : 0;
-      ctx.shadowColor = `hsl(${rocket.hue}, 100%, 70%)`;
-      ctx.fillStyle = `hsl(${rocket.hue}, 100%, 65%)`;
+      if (this.glowEnabled) {
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = `hsl(${rocket.hue}, 100%, 70%)`;
+        ctx.beginPath();
+        ctx.arc(rocket.x, rocket.y, 22, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `hsl(${rocket.hue}, 100%, 82%)`;
       ctx.beginPath();
-      ctx.arc(rocket.x, rocket.y, 10, 0, TAU);
+      ctx.arc(rocket.x, rocket.y, 8, 0, TAU);
       ctx.fill();
     }
-
-    ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
 
     for (const bird of this.birds) {
