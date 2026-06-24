@@ -6,9 +6,9 @@ const MAX_PARTICLES = 1200;
 const BURST_COUNT_MIN = 80;
 const BURST_COUNT_MAX = 120;
 const COMBO_WINDOW_MS = 1500;
-const AUTO_LAUNCH_MIN_MS = 800;
-const AUTO_LAUNCH_MAX_MS = 2000;
-const HIT_RADIUS = 30;
+const AUTO_LAUNCH_MIN_MS = 1200;
+const AUTO_LAUNCH_MAX_MS = 2500;
+const HIT_RADIUS = 50;
 const GAME_DURATION = 60;
 
 function rand(min, max) {
@@ -82,13 +82,23 @@ class Rocket {
     this._tailTimer = 0;
 
     const angle = Math.atan2(targetY - y, targetX - x);
-    this.vx = Math.cos(angle) * ROCKET_SPEED;
-    this.vy = Math.sin(angle) * ROCKET_SPEED;
+    this._ux = Math.cos(angle);
+    this._uy = Math.sin(angle);
+    this._totalDist = Math.hypot(targetX - x, targetY - y);
+    this._gravityVy = 0;
   }
 
   update(particles) {
-    this.x += this.vx;
-    this.y += this.vy;
+    const remaining = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+    const progress = 1 - remaining / this._totalDist;
+
+    if (progress > 0.70) {
+      this._gravityVy = Math.min(this._gravityVy + 0.05, 1.0);
+    }
+
+    const speed = ROCKET_SPEED * Math.max(0.08, 1 - Math.pow(progress, 1.3));
+    this.x += this._ux * speed;
+    this.y += this._uy * speed + this._gravityVy;
 
     this._tailTimer++;
     if (this._tailTimer >= 2) {
@@ -108,9 +118,7 @@ class Rocket {
       }));
     }
 
-    const dx = this.targetX - this.x;
-    const dy = this.targetY - this.y;
-    if (Math.sqrt(dx * dx + dy * dy) < ROCKET_SPEED) {
+    if (speed < 0.6 || (this._gravityVy > 0.4 && remaining < 60)) {
       this.done = true;
     }
   }
@@ -208,17 +216,26 @@ class Game {
     if (!this._audioCtx) return;
     const ctx = this._audioCtx;
     const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
+    const duration = 0.9;
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 15;
+    filter.frequency.setValueAtTime(800, now);
+    filter.frequency.exponentialRampToValueAtTime(3000, now + duration * 0.8);
     const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(180, now);
-    osc.frequency.linearRampToValueAtTime(700, now + 0.25);
-    gain.gain.setValueAtTime(0.1, now);
-    gain.gain.linearRampToValueAtTime(0, now + 0.25);
-    osc.connect(gain);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.05);
+    gain.gain.linearRampToValueAtTime(0.15, now + duration * 0.7);
+    gain.gain.linearRampToValueAtTime(0, now + duration);
+    src.connect(filter);
+    filter.connect(gain);
     gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.25);
+    src.start(now);
   }
 
   _playBurst() {
@@ -318,6 +335,19 @@ class Game {
     this._playLaunch();
   }
 
+  _spawnBurst() {
+    const count = randInt(1, 3);
+    for (let i = 0; i < count; i++) {
+      if (i === 0) {
+        this._spawnRocket();
+      } else {
+        setTimeout(() => {
+          if (!this.gameOver) this._spawnRocket();
+        }, i * randInt(80, 220));
+      }
+    }
+  }
+
   _addScore(x, y) {
     const now = Date.now();
     if (now - this.lastBurstTime < COMBO_WINDOW_MS) {
@@ -354,7 +384,7 @@ class Game {
     }
 
     if (this.gameStarted && !this.gameOver && timestamp >= this._nextLaunchTime) {
-      this._spawnRocket();
+      this._spawnBurst();
       this._nextLaunchTime = timestamp + rand(AUTO_LAUNCH_MIN_MS, AUTO_LAUNCH_MAX_MS);
     }
 
@@ -498,8 +528,8 @@ class Game {
 
     ctx.textAlign = 'center';
     ctx.font = 'bold 44px monospace';
-    ctx.fillStyle = '#ff4455';
-    ctx.fillText('TEMPS ÉCOULÉ !', cx, cy - 70);
+    ctx.fillStyle = 'rgba(255, 210, 40, 0.95)';
+    ctx.fillText('Bonne Saint-Jean !', cx, cy - 70);
 
     ctx.font = 'bold 30px monospace';
     ctx.fillStyle = 'white';
