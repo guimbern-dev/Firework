@@ -12,6 +12,10 @@ const HIT_RADIUS = 50;
 const GAME_DURATION = 60;
 const CHAIN_RADIUS = 95;
 const CHAIN_DELAY_MS = 120;
+const BIRD_HIT_RADIUS   = 35;
+const DEBRIS_HIT_RADIUS = 28;
+const BIRD_SPAWN_MIN_MS = 7000;
+const BIRD_SPAWN_MAX_MS = 14000;
 
 function rand(min, max) {
   return min + Math.random() * (max - min);
@@ -36,6 +40,7 @@ class Particle {
     this.radiusDecay = opts.radiusDecay ?? 0.98;
     this.gravity = opts.gravity ?? GRAVITY;
     this.drag = opts.drag ?? DRAG;
+    this.isDebris = opts.isDebris ?? false;
   }
 
   update() {
@@ -190,6 +195,45 @@ class Rocket {
   }
 }
 
+class Bird {
+  constructor(x, y, vx, vy) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.done = false;
+  }
+
+  update(canvasW, canvasH) {
+    this.vy += 0.06;
+    this.x += this.vx;
+    this.y += this.vy;
+    if (this.x < -70 || this.x > canvasW + 70 || this.y > canvasH + 70) {
+      this.done = true;
+    }
+  }
+
+  explode(particles) {
+    for (let i = 0; i < 25; i++) {
+      const angle = rand(0, TAU);
+      particles.push(new Particle(this.x, this.y, {
+        vx: Math.cos(angle) * rand(4, 13),
+        vy: Math.sin(angle) * rand(4, 13),
+        hue: rand(0, 30), sat: 90, light: 60,
+        alpha: 1, alphaDecay: 0.018,
+        radius: rand(3, 6), radiusDecay: 0.965,
+        gravity: 0.08, drag: 0.97,
+        isDebris: true,
+      }));
+    }
+    particles.push(new Particle(this.x, this.y, {
+      vx: 0, vy: 0, hue: 0, sat: 0, light: 100,
+      alpha: 0.9, alphaDecay: 0.1, radius: 42, radiusDecay: 0.84,
+      gravity: 0, drag: 1,
+    }));
+  }
+}
+
 class Game {
   constructor() {
     this.canvas = null;
@@ -213,6 +257,8 @@ class Game {
     this._replayBtn = null;
     this._audioCtx = null;
     this._shake = 0;
+    this.birds = [];
+    this._nextBirdTime = 0;
   }
 
   init() {
@@ -313,7 +359,19 @@ class Game {
       this.gameStarted = true;
       this._startTimestamp = performance.now();
       this._nextLaunchTime = 0;
+      this._nextBirdTime = performance.now() + rand(3000, 6000);
       return;
+    }
+
+    for (let i = this.birds.length - 1; i >= 0; i--) {
+      const b = this.birds[i];
+      if (Math.hypot(b.x - x, b.y - y) < BIRD_HIT_RADIUS) {
+        b.explode(this.particles);
+        this._addScore(b.x, b.y);
+        this._playBurst();
+        this.birds.splice(i, 1);
+        return;
+      }
     }
 
     let hit = null;
@@ -348,6 +406,7 @@ class Game {
   }
 
   _resetGame() {
+    this.birds = [];
     this.rockets = [];
     this.particles = [];
     this.scoreLabels = [];
@@ -359,6 +418,7 @@ class Game {
     this._startTimestamp = 0;
     this.timeLeft = GAME_DURATION;
     this._nextLaunchTime = 0;
+    this._nextBirdTime = 0;
   }
 
   _spawnRocket() {
@@ -382,6 +442,81 @@ class Game {
         }, i * randInt(80, 220));
       }
     }
+  }
+
+  _spawnBird() {
+    const fromLeft = Math.random() < 0.5;
+    const x = fromLeft ? -30 : this.canvas.width + 30;
+    const y = rand(this.canvas.height * 0.15, this.canvas.height * 0.65);
+    const vx = fromLeft ? rand(5, 9) : rand(-9, -5);
+    const vy = rand(-7, -2);
+    this.birds.push(new Bird(x, y, vx, vy));
+  }
+
+  _drawBird(bird) {
+    const { ctx } = this;
+    const r = 20;
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    if (bird.vx < 0) ctx.scale(-1, 1);
+
+    ctx.beginPath(); ctx.arc(0, 3, r, 0, TAU);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill();
+
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU);
+    ctx.fillStyle = '#c0392b'; ctx.fill();
+
+    ctx.beginPath(); ctx.ellipse(2, 6, 12, 8, -0.1, 0, TAU);
+    ctx.fillStyle = '#e8b49a'; ctx.fill();
+
+    ctx.fillStyle = '#922b21';
+    ctx.beginPath();
+    ctx.moveTo(-5, -r + 3);
+    ctx.bezierCurveTo(-10, -r - 4, -6, -r - 15, 0, -r - 11);
+    ctx.bezierCurveTo(6, -r - 15, 10, -r - 4, 5, -r + 3);
+    ctx.fill();
+
+    ctx.beginPath(); ctx.arc(-4, -5, 6, 0, TAU);
+    ctx.fillStyle = 'white'; ctx.fill();
+    ctx.beginPath(); ctx.arc(-3, -4.5, 3.5, 0, TAU);
+    ctx.fillStyle = '#5d4037'; ctx.fill();
+    ctx.beginPath(); ctx.arc(-2.5, -4.5, 2, 0, TAU);
+    ctx.fillStyle = '#111'; ctx.fill();
+    ctx.beginPath(); ctx.arc(-3.5, -5.5, 0.9, 0, TAU);
+    ctx.fillStyle = 'white'; ctx.fill();
+
+    ctx.beginPath(); ctx.arc(6, -5, 6.5, 0, TAU);
+    ctx.fillStyle = 'white'; ctx.fill();
+    ctx.beginPath(); ctx.arc(7, -4.5, 4, 0, TAU);
+    ctx.fillStyle = '#5d4037'; ctx.fill();
+    ctx.beginPath(); ctx.arc(7.5, -4.5, 2.2, 0, TAU);
+    ctx.fillStyle = '#111'; ctx.fill();
+    ctx.beginPath(); ctx.arc(6.5, -5.8, 1, 0, TAU);
+    ctx.fillStyle = 'white'; ctx.fill();
+
+    ctx.strokeStyle = '#3e2009'; ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-11, -10);
+    ctx.lineTo(-4, -14);
+    ctx.lineTo(2, -11);
+    ctx.lineTo(9, -14);
+    ctx.lineTo(14, -9);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(r - 5, 1); ctx.lineTo(r + 9, -1);
+    ctx.lineTo(r + 9, 2.5); ctx.lineTo(r - 5, 4);
+    ctx.closePath();
+    ctx.fillStyle = '#f5a623'; ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(r - 5, 4); ctx.lineTo(r + 9, 2.5);
+    ctx.lineTo(r + 7, 7); ctx.lineTo(r - 5, 7);
+    ctx.closePath();
+    ctx.fillStyle = '#e67e22'; ctx.fill();
+
+    ctx.restore();
   }
 
   _triggerChain(x, y, depth = 0) {
@@ -458,6 +593,11 @@ class Game {
       this._nextLaunchTime = timestamp + rand(AUTO_LAUNCH_MIN_MS, AUTO_LAUNCH_MAX_MS);
     }
 
+    if (this.gameStarted && !this.gameOver && timestamp >= this._nextBirdTime && this._nextBirdTime > 0) {
+      this._spawnBird();
+      this._nextBirdTime = timestamp + rand(BIRD_SPAWN_MIN_MS, BIRD_SPAWN_MAX_MS);
+    }
+
     this._update();
     this._render();
 
@@ -465,6 +605,11 @@ class Game {
   }
 
   _update() {
+    for (let i = this.birds.length - 1; i >= 0; i--) {
+      this.birds[i].update(this.canvas.width, this.canvas.height);
+      if (this.birds[i].done) this.birds.splice(i, 1);
+    }
+
     for (let i = this.rockets.length - 1; i >= 0; i--) {
       const rocket = this.rockets[i];
       rocket.update(this.particles);
@@ -486,6 +631,28 @@ class Game {
 
     if (this.particles.length > MAX_PARTICLES) {
       this.particles.splice(0, this.particles.length - MAX_PARTICLES);
+    }
+
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      if (!p.isDebris || p.alpha < 0.15) continue;
+      let hit = false;
+      for (let j = this.rockets.length - 1; j >= 0; j--) {
+        if (Math.hypot(p.x - this.rockets[j].x, p.y - this.rockets[j].y) < DEBRIS_HIT_RADIUS) {
+          const r = this.rockets[j];
+          this.rockets.splice(j, 1);
+          r.burst(this.particles);
+          this._playBurst();
+          this.score += 30;
+          this.scoreLabels.push(new ScoreLabel(r.x, r.y - 20, 'FRAPPE ! +30', '#ff6600'));
+          hit = true;
+          break;
+        }
+      }
+      if (hit) {
+        this.particles[i] = this.particles[this.particles.length - 1];
+        this.particles.pop();
+      }
     }
 
     i = this.scoreLabels.length;
@@ -534,6 +701,10 @@ class Game {
 
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
+
+    for (const bird of this.birds) {
+      this._drawBird(bird);
+    }
 
     if (shaking) ctx.restore();
 
